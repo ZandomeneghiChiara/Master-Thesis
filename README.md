@@ -1,0 +1,2 @@
+# Development-of-an-Analytical-Thermal-Model-for-Optimizing-Air-Cooled-Lithium-Ion-Battery-Systems
+My Master’s thesis focuses on developing a semi-analytical thermal model for air-cooled lithium-ion battery systems. The project integrates CFD simulations, analytical heat transfer modeling, and optimization techniques to analyze airflow behavior, temperature distribution, and battery cell layout for improved automotive battery thermal management.
