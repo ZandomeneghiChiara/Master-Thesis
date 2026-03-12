@@ -1,0 +1,138 @@
+clear 
+close all 
+clc 
+
+% Molicel Battery Data 
+Q_nom = 4.5;     % Ah | Nominal Capacity (4.5Ah 18650 cell)
+m_cell = 0.07;   % kg | Cell Mass (typical 18650 weight)
+C_b = 885;       % J/kg*K | Thermal Capacity of Battery (Lithium-ion battery av_average)
+R = 0.011;       % Ohm | Internal Resistance (typical for 4.5Ah cell)
+s = 0.002;       % m | Height of Battery Cell Slice (2mm slice of 65mm cell)
+dTheta = 20;     % ° | Angle increment for slice (18 slices for full circle)
+
+% Slice Thermal Properties
+lambda = 17;                    % W/m·K | Thermal conductiv_avity of Steel casing
+k = 0.026;                      % W/m·K | Thermal conductiv_avity of Air at 300K
+m = m_cell * (dTheta / (2*pi)); % kg | Mass of the slice (~0.002kg)
+
+%% Current Input 
+I = Q_nom * 8;                      % A | 8C to reach high temp (36A)
+G = (I^2 * R) * (dTheta / (2*pi));  % W | Heat generation in slice
+
+%% Boundary Layer Width Calculation 
+rho = 1.225;                    % kg/m³ | Air density at sea lev_avel, 20°C
+v_av0 = 0;                      % m/s | Initial Air v_avelocity
+v_max = 54.5;                   % m/s | Max Air v_avelocity to 54.5 m/s 
+v_av= (v_max - v_av0) / 2;      % m/s | Av_average Air v_avelocity
+mu = 1.7894e-5;                 % Pa·s | Dynamic v_aviscosity of air at 20°C
+L = 2*0.09;                     % m | Characteristic length (twice cell diameter)
+Re = (rho * v_av* L)/ mu;       % Reynolds number (dimensionless) 
+% Turbolent Coefficients
+alpha = 0;                        % Empirical coefficient for boundary layer 
+beta = -0.4;                      % Empirical coefficient for boundary layer  
+C_a = 0.37;                       % Empirical coefficient for turbulent flow
+WTheta = C_a * v_av^alpha * Re^beta; % m | Boundary Layer Width 
+
+%% Temperature Calculation - Time Stepping 
+G_pure = (I^2 * R) / (2 * pi);  % W/rad | Heat dissipated per radian
+
+deltat = 0.1;                   % s | Time step (0.1 seconds)
+tot_time = 60;                  % s | Total simulation time (60 seconds) 
+time_steps = tot_time / deltat; % Number of time steps 
+
+% Initialize temperatures for all slices (in Kelv_avin) 
+n_slices = 360 / dTheta;      % Number of Slices (18 for 20° increments)
+theta = linspace(0, 360, n_slices);
+T = 308 * ones(1, n_slices);  % K | Initial temperature: 308 K (35°C) for all slices
+
+peak_angle = 138;
+v_el_prof = v_av * exp(-0.5*((theta - peak_angle) / 30).^2);
+
+To = zeros(time_steps, n_slices);
+To_init = 308; 
+
+for t = 1:time_steps
+    To_g = To_init + 0.5*(t + deltat);              % Temperature growth
+    
+    cool_eff = 5*(1 - v_el_prof / max(v_el_prof));    % Cooling effect
+    To(t, :) = To_g - cool_eff;  
+end 
+
+r = 0.009;                    % m | Cell radius (9 mm)
+
+T_history = zeros(time_steps, n_slices);
+T_history(1, :) = T;
+
+%% Temperature in a Cell
+for t = 1:time_steps
+    Tnp = T;     % New Temperature based on prev_avious
+
+    % For Each Slice: 
+    for n = 1:n_slices
+        left = n;       % Left Slice Index (with wrap-around)
+        if left < 1
+            left = n_slices;
+        end
+        
+        right = n+1;      % Right Slice Index (with wrap-around)
+        if right > n_slices 
+            right = 1;
+        end     
+        
+        % Thermal exchange with adjacent slices                
+        ets = 2*lambda*s*(Tnp(right) + Tnp(left)) / dTheta; % W | Heat exchange  
+   
+        % Thermal exchange with ambient air (using time and angle-dependent To)
+        % With v_avelocity-dependent cooling:
+        current_v_el = v_el_prof(n); % v_avelocity at this angle
+        current_WTheta = C_a * current_v_el^alpha * Re^beta; % Update BL width
+        eto = k * r * (Tnp(n) - To(t, n)) / current_WTheta;
+
+        % Calculate new temperature in slice n
+        T(n) = Tnp(n) + ((deltat * 2 * pi) / (C_b * m)) * (G_pure - ets - eto);
+    end 
+
+    T_history(t, :) = T;
+
+    % Print progress ev_avery 10 steps
+    if mod(t, 10) == 0
+        fprintf('Time: %.1f s | Avg Temp: %.2f K\n', t * deltat, mean(T));
+    end
+end
+
+time_vector = 0:deltat:tot_time-deltat;
+
+
+%% Plot 1: Final Temperature Distribution (Polar Plot)
+figure(1) 
+subplot(1,2,1)
+polarplot(deg2rad(theta), T_history(end,:), '-o', 'LineWidth', 2, 'MarkerSize', 8)
+title('Final Temperature Distribution (K)', 'FontSize', 14)
+thetalim([0 360])
+rlim([300 330]) % Set appropriate limits for Kelv_avin scale
+set(gca, 'FontSize', 12)
+
+% Plot 1,2,2: Temperature Ev_avolution Ov_aver Time for All Slices
+subplot(1,2,2)
+plot(time_vector, T_history)
+xlabel('Time (s)', 'FontSize', 12)
+ylabel('Temperature (K)', 'FontSize', 12)
+title('Temperature Ev_avolution for All Slices', 'FontSize', 14)
+grid on
+legend(cellstr(num2str(theta', '%.0f°')), 'Location', 'eastoutside')
+
+
+%% Plot 2: 3D Surface Plot of Temperature v_avs Angle v_avs Time
+figure(2)
+[Time, Theta] = meshgrid(time_vector, theta);
+surf(Time, Theta, T_history')
+xlabel('Time (s)', 'FontSize', 12)
+ylabel('Angle (degrees)', 'FontSize', 12)
+zlabel('Temperature (K)', 'FontSize', 12)
+title('3D Temperature Distribution', 'FontSize', 14)
+colorbar
+shading interp
+view(30, 45)
+
+
+
